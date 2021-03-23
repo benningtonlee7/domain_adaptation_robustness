@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import params
-from utils import make_variable, normalize
+from utils.utils import make_variable, normalize
 from core.pgd import attack_pgd
 
 def eval_src_robust(encoder, classifier, data_loader):

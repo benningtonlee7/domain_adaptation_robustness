@@ -29,6 +29,8 @@ def train_src_adda(encoder, classifier, data_loader):
     # Step 2: Pretrain the source model
     for epoch in range(params.num_epochs_pre):
         train_acc, train_n = 0, 0
+        start_time = time.time()
+
         for step, (images, labels) in enumerate(data_loader):
 
             # Make images and labels variable
@@ -37,6 +39,7 @@ def train_src_adda(encoder, classifier, data_loader):
 
             # Zero gradients for optimizer
             optimizer.zero_grad()
+
             # Compute loss for critic
             preds = classifier(encoder(images))
             loss = criterion(preds, labels)
@@ -45,7 +48,8 @@ def train_src_adda(encoder, classifier, data_loader):
             loss.backward()
             optimizer.step()
 
-            train_acc += torch.sum(preds == labels.data)
+            train_acc += torch.sum(preds.max(1)[1] == labels.data)
+            train_n += labels.size(0)
 
             # Print step info
             if ((step + 1) % params.log_step_pre == 0):
@@ -56,6 +60,7 @@ def train_src_adda(encoder, classifier, data_loader):
                               len(data_loader),
                               loss.item(),
                               train_acc/train_n))
+        time_elapsed = time.time() - start_time
 
         # Eval model on test set
         if ((epoch + 1) % params.eval_step_pre == 0):
@@ -63,9 +68,10 @@ def train_src_adda(encoder, classifier, data_loader):
 
         # Save model parameters
         if ((epoch + 1) % params.save_step_pre == 0):
+            print('Epoch [{}/{}] complete in {:.0f}m {:.0f}s'.format(epoch + 1,
+                    params.num_epochs, time_elapsed // 60, time_elapsed % 60))
             save_model(encoder, "{}-source-encoder-{}.pt".format("ADDA", epoch + 1))
-            save_model(
-                classifier, "{}-source-classifier-{}.pt".format("ADDA", epoch + 1))
+            save_model(classifier, "{}-source-classifier-{}.pt".format("ADDA", epoch + 1))
 
     # Save final model
     save_model(encoder, "{}-source-encoder-final.pt".format("ADDA"))
@@ -73,7 +79,7 @@ def train_src_adda(encoder, classifier, data_loader):
 
     return encoder, classifier
 
-def train_src_robust(encoder, classifier, data_loader, model="ADDA"):
+def train_src_robust(encoder, classifier, data_loader):
     """Train classifier for source domain with robust training"""
 
     # Step 1: Network setup
@@ -93,9 +99,8 @@ def train_src_robust(encoder, classifier, data_loader, model="ADDA"):
 
         # Init accuracy and loss
         start_time = time.time()
-        train_loss, train_acc = 0, 0
+        train_loss, train_acc, train_n = 0, 0, 0
         train_robust_loss, train_robust_acc = 0, 0
-        train_n = 0
 
         for step, (images, labels) in enumerate(data_loader):
 
@@ -135,7 +140,7 @@ def train_src_robust(encoder, classifier, data_loader, model="ADDA"):
             # Print step info
             if ((step + 1) % params.log_step_pre == 0):
                 print("Epoch [{}/{}] Step [{}/{}] Avg Training loss: {:4f} Avg Training Accuracy: {:.4%}"
-                      " Avg Robust Training Loss: {:4f} Avg Robust Training Accuracy: {:4%}".format(epoch + 1,
+                      " Avg Robust Training Loss: {:4f} Avg Robust Training Accuracy: {:.4%}".format(epoch + 1,
                               params.num_epochs_pre,
                               step + 1,
                               len(data_loader),
@@ -153,12 +158,12 @@ def train_src_robust(encoder, classifier, data_loader, model="ADDA"):
         if ((epoch + 1) % params.save_step_pre == 0):
             print('Epoch [{}/{}] complete in {:.0f}m {:.0f}s'.format(epoch + 1,
                     params.num_epochs, time_elapsed // 60, time_elapsed % 60))
-            save_model(encoder, "{}-source-encoder-robust-{}.pt".format(model, epoch + 1))
-            save_model(classifier, "{}-source-classifier-robust-{}.pt".format(model, epoch + 1))
+            save_model(encoder, "{}-source-encoder-robust-{}.pt".format("ADDA", epoch + 1))
+            save_model(classifier, "{}-source-classifier-robust-{}.pt".format("ADDA", epoch + 1))
 
     # Save final model
-    save_model(encoder, "{}-source-encoder-final-robust.pt".format(model))
-    save_model(classifier, "{}-source-classifier-final-robust.pt".format(model))
+    save_model(encoder, "ADDA-source-encoder-final-robust.pt")
+    save_model(classifier, "ADDA-source-classifier-final-robust.pt")
 
     return encoder, classifier
 
@@ -186,39 +191,41 @@ def train_tgt_adda(src_encoder, tgt_encoder, critic, src_data_loader, tgt_data_l
         start_time = time.time()
         # Zip source and target data pair
         data_zip = enumerate(zip(src_data_loader, tgt_data_loader))
-        for step, ((images_src, label_src), (images_tgt, _)) in data_zip:
+        for step, ((images_src, _), (images_tgt, _)) in data_zip:
 
             # 2.1 train discriminator with fixed src_encoder
             # Make images variable
             images_src = make_variable(images_src)
             images_tgt = make_variable(images_tgt)
 
-            # Update lr - using piecewise lr scheduler from "Overfitting in adversarially robust deep learning"
-            lr = lr_schedule(epoch + 1, params.num_epochs)
-            update_lr(optimizer_tgt, lr)
-            update_lr(optimizer_critic, lr)
+            # Prepare real and fake label (domain labels)
+            label_src = make_variable(torch.ones(images_src.size(0)).long())
+            label_tgt = make_variable(torch.zeros(images_tgt.size(0)).long())
+            label_concat = torch.cat((label_src, label_tgt), 0)
 
             if robust:
-                delta = attack_pgd(src_encoder, images_src, label_src)
+                # Update lr - using piecewise lr scheduler from "Overfitting in adversarially robust deep learning"
+                lr = lr_schedule(epoch + 1, params.num_epochs)
+                update_lr(optimizer_tgt, lr)
+                update_lr(optimizer_critic, lr)
+                # Here, we attack imgs with domain labels
+                delta_src = attack_pgd(src_encoder, images_src, label_src)
+                delta_tgt = attack_pgd(tgt_encoder, images_tgt, label_tgt)
 
-                robust_imgs = normalize(torch.clamp(images_src + delta[:images_src.size(0)],
+                robust_src = normalize(torch.clamp(images_src + delta_src[:images_src.size(0)],
                                                       min=params.lower_limit, max=params.upper_limit))
-
+                robust_tgt = normalize(torch.clamp(images_tgt + delta_tgt[:images_src.size(0)],
+                                                      min=params.lower_limit, max=params.upper_limit))
             # Zero gradients for optimizer for the discriminator
             optimizer_critic.zero_grad()
 
             # Extract and concat features
-            feat_src = src_encoder(robust_imgs)
-            feat_tgt = tgt_encoder(images_tgt)
+            feat_src = src_encoder(images_src) if not robust else src_encoder(robust_src)
+            feat_tgt = tgt_encoder(images_tgt) if not robust else tgt_encoder(robust_tgt)
             feat_concat = torch.cat((feat_src, feat_tgt), 0)
 
             # Predict on discriminator
             pred_concat = critic(feat_concat.detach())
-
-            # Prepare real and fake label
-            label_src = make_variable(torch.ones(feat_src.size(0)).long())
-            label_tgt = make_variable(torch.zeros(feat_tgt.size(0)).long())
-            label_concat = torch.cat((label_src, label_tgt), 0)
 
             # Compute loss for critic
             loss_critic = criterion(pred_concat, label_concat)
@@ -239,10 +246,11 @@ def train_tgt_adda(src_encoder, tgt_encoder, critic, src_data_loader, tgt_data_l
             label_tgt = make_variable(torch.ones(feat_tgt.size(0)).long())
 
             if robust:
-                delta = attack_pgd(src_encoder, images_tgt, label_tgt)
-                images_tgt = normalize(torch.clamp(images_tgt + delta[:images_src.size(0)],
+                # Attack the target images with domain labels
+                delta_tgt = attack_pgd(src_encoder, images_tgt, label_tgt)
+                images_tgt = normalize(torch.clamp(images_tgt + delta_tgt[:images_src.size(0)],
                                                       min=params.lower_limit, max=params.upper_limit))
-
+                images_tgt.detach()
             # Extract and target features
             feat_tgt = tgt_encoder(images_tgt)
 
@@ -260,7 +268,7 @@ def train_tgt_adda(src_encoder, tgt_encoder, critic, src_data_loader, tgt_data_l
             if ((step + 1) % params.log_step == 0):
                 print("Epoch [{}/{}] Step [{}/{}]:"
                       "Avg Discriminator Loss: {:4f} Avg Tgt Discriminator loss: {:4f} Avg accuracy: {:.4%}"
-                      .format(epoch + 1,params.num_epochs, step + 1, len_data_loader, loss_critic.item(),
+                      .format(epoch + 1, params.num_epochs, step + 1, len_data_loader, loss_critic.item(),
                               loss_tgt.item(), acc.item()))
 
         time_elapsed = time.time() - start_time
@@ -277,11 +285,9 @@ def train_tgt_adda(src_encoder, tgt_encoder, critic, src_data_loader, tgt_data_l
                 "{}-target-encoder-{}.pt".format("ADDA", epoch + 1)))
 
     torch.save(critic.state_dict(), os.path.join(
-        params.model_root,
-        "{}-critic-final.pt".format("ADDA")))
+        params.model_root, "ADDA-critic-final.pt"))
     torch.save(tgt_encoder.state_dict(), os.path.join(
-        params.model_root,
-        "{}-target-encoder-final.pt".format("ADDA")))
+        params.model_root,"ADDA-target-encoder-final.pt"))
     return tgt_encoder
 
 def train_critic_wdgrl(encoder, critic, src_data_loader, tgt_data_loader):
@@ -298,11 +304,13 @@ def train_critic_wdgrl(encoder, critic, src_data_loader, tgt_data_loader):
     criterion = nn.CrossEntropyLoss()
     len_data_loader = min(len(src_data_loader), len(tgt_data_loader))
 
-    for epoch in range(params.num_epochs_pre):
+    for epoch in range(params.num_epochs_wdgrl_pre):
         critic_loss, train_n = 0, 0
+        start_time = time.time()
 
         # Zip source and target data pair
         data_zip = enumerate(zip(src_data_loader, tgt_data_loader))
+
         for step, ((images_src, _), (images_tgt, _)) in data_zip:
 
             # Make images and labels variable
@@ -327,24 +335,26 @@ def train_critic_wdgrl(encoder, critic, src_data_loader, tgt_data_loader):
             # Optimize critic
             critic_cost.backward()
             optimizer.step()
-            critic_loss += critic_cost.item()
 
             # Print step info
             if ((step + 1) % params.log_step_pre == 0):
-                print("Epoch [{}/{}] Step [{}/{}] Training Critic Loss: {:.4f}"
+                print("Epoch [{}/{}] Step [{}/{}] Training Critic Cost: {:.4f}"
                       .format(epoch + 1,
                               params.num_epochs_pre,
                               step + 1,
                               len_data_loader,
                               critic_cost.item()))
 
+        time_elapsed = time.time() - start_time
 
         # Save critic parameters
         if ((epoch + 1) % params.save_step_pre == 0):
-            save_model(critic, "wdgrl_critic-source-encoder-{}.pt".format(epoch + 1))
+            print('Epoch [{}/{}] complete in {:.0f}m {:.0f}s'.format(epoch + 1,
+                              params.num_epochs_wdgrl_pre, time_elapsed // 60, time_elapsed % 60))
+            save_model(critic, "wdgrl_critic-{}.pt".format(epoch + 1))
 
     # Save final model
-    save_model(encoder, "wdgrl_critic-source-encoder-final.pt")
+    save_model(encoder, "wdgrl_critic-final.pt")
 
     return critic
 
@@ -359,11 +369,11 @@ def train_tgt_wdgrl(encoder, clf, critic, src_data_loader, tgt_data_loader, robu
     optimizer = optim.Adam(list(encoder.parameters()) + list(clf.parameters()),
                                lr=params.c_learning_rate,
                                betas=(params.beta1, params.beta2))
-
     len_data_loader = min(len(src_data_loader), len(tgt_data_loader))
+
     # Step 2 Train network
     for epoch in range(params.num_epochs):
-        ave_loss, train_n = 0, 0
+        ave_loss, train_n, train_acc = 0, 0, 0
         start_time = time.time()
         # Zip source and target data pair
         data_zip = enumerate(zip(src_data_loader, tgt_data_loader))
@@ -373,10 +383,18 @@ def train_tgt_wdgrl(encoder, clf, critic, src_data_loader, tgt_data_loader, robu
             images_tgt = make_variable(images_tgt)
             labels_src = make_variable(labels_src.squeeze_())
 
-            lr = lr_schedule(epoch + 1, params.num_epochs)
-            update_lr(optimizer, lr)
+            if robust:
+                # Update lr - using piecewise lr scheduler from "Overfitting in adversarially robust deep learning"
+                lr = lr_schedule(epoch + 1, params.num_epochs)
+                update_lr(optimizer, lr)
+                # PDG attack on the source image
+                delta_src = attack_pgd(encoder, images_src, labels_src)
 
-            feat_src = encoder(images_src)
+                robust_src = normalize(torch.clamp(images_src + delta_src[:images_src.size(0)],
+                                                      min=params.lower_limit, max=params.upper_limit))
+
+
+            feat_src = encoder(images_src) if not robust else encoder(robust_src)
             feat_tgt = encoder(images_tgt)
 
             preds_src = clf(feat_src)
@@ -388,15 +406,17 @@ def train_tgt_wdgrl(encoder, clf, critic, src_data_loader, tgt_data_loader, robu
             loss.backward()
             ave_loss += loss.item()
             train_n += images_src.size(0)
+            train_acc += torch.sum(preds_src.max(1)[1] == labels_src.data)
             optimizer.step()
 
             if ((step + 1) % params.log_step == 0):
-                print("Epoch [{}/{}] Step [{}/{}]: Avg Training loss: {:4f}"
+                print("Epoch [{}/{}] Step [{}/{}]: Avg Training loss: {:4f} Ave Training Accuracy {:.4%}"
                       .format(epoch + 1,
                               params.num_epochs,
                               step + 1,
                               len_data_loader,
-                              ave_loss/train_n))
+                              ave_loss/train_n,
+                              train_acc/train_n))
 
         time_elapsed = time.time() - start_time
 
@@ -416,3 +436,4 @@ def train_tgt_wdgrl(encoder, clf, critic, src_data_loader, tgt_data_loader, robu
         params.model_root, "wdgrl-encoder-final.pt"))
 
     return encoder, clf
+
