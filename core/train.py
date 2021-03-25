@@ -559,15 +559,21 @@ def train_revgard(encoder, classifier, critic, src_data_loader, tgt_data_loader,
                 else "REVGRAD-classifier-rb-{}.pt".format(epoch + 1)
             save_model(classifier, params.revgard_root, filename)
 
+            filename = "REVGRAD-critic-{}.pt".format(epoch + 1) if not robust \
+                else "REVGRAD-critic-rb-{}.pt".format(epoch + 1)
+            save_model(critic, params.revgard_root, filename)
+
     # Save final model
     filename = "REVGRAD-encoder-final.pt" if not robust else "REVGRAD-encoder-rb-final.pt"
     save_model(encoder, params.revgard_root, filename)
     filename = "REVGRAD-classifier-final.pt" if not robust else "REVGRAD-classifier-rb-final.pt"
     save_model(classifier, params.revgard_root, filename)
+    filename = "REVGRAD-critic-final.pt" if not robust else "REVGRAD-critic-rb-final.pt"
+    save_model(critic, params.revgard_root, filename)
 
-    return encoder, classifier
+    return encoder, classifier, critic
 
-def train_dann_robust(encoder, classifier, critic, src_data_loader, tgt_data_loader, tgt_data_loader_eval, robust=True):
+def train_dann(encoder, classifier, critic, src_data_loader, tgt_data_loader, tgt_data_loader_eval, robust=True):
 
     # 1. Network Setup
     encoder.train()
@@ -661,12 +667,17 @@ def train_dann_robust(encoder, classifier, critic, src_data_loader, tgt_data_loa
             filename = "DANN-classifier-{}.pt".format(epoch + 1) if not robust \
                 else "DANN-classifier-rb-{}.pt".format(epoch + 1)
             save_model(classifier, params.dann_root, filename)
+            filename = "DANN-critic-{}.pt".format(epoch + 1) if not robust \
+                else "DANN-critic-rb-{}.pt".format(epoch + 1)
+            save_model(critic, params.dann_root, filename)
 
     # Save final model
-    filename =  "DANN-encoder-final.pt" if not robust else "DANN-encoder-rb-final.pt"
+    filename = "DANN-encoder-final.pt" if not robust else "DANN-encoder-rb-final.pt"
     save_model(encoder, params.dann_root, filename)
-    filename =  "DANN-classifier-final.pt" if not robust else "DANN-classifier-rb-final.pt"
+    filename = "DANN-classifier-final.pt" if not robust else "DANN-classifier-rb-final.pt"
     save_model(classifier, params.dann_root, filename)
+    filename = "DANN-critic-final.pt" if not robust else "DANN-critic-rb-final.pt"
+    save_model(critic, params.dann_root, filename)
 
-    return encoder, classifier
+    return encoder, classifier, critic
 

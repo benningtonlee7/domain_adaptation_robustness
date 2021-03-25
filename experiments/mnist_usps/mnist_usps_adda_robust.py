@@ -32,7 +32,7 @@ def main():
         src_encoder, clf = train_src_robust(src_encoder, clf, mnist_data_loader)
 
     # Eval source model
-    print("====== Robust evaluating classifier for MNIST domain ======")
+    print("====== Evaluating classifier for MNIST domain ======")
     eval_tgt_robust(src_encoder, clf, mnist_data_loader_eval)
 
     # Train target encoder
@@ -47,7 +47,7 @@ def main():
                                      mnist_data_loader, usps_data_loader, robust=True)
 
     # Eval target encoder on test set of target dataset
-    print("====== Robust ealuating classifier for encoded USPS domain ======")
+    print("====== Ealuating classifier for encoded USPS domain ======")
     print("-------- Source only --------")
     eval_tgt_robust(src_encoder, clf, usps_data_loader_eval)
     print("-------- Domain adaption --------")
