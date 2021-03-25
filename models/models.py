@@ -4,14 +4,10 @@ Base models for:
     WDGRL: Wasserstein Distance Guided Representation Learning, Shen et al. (2017)
     REVGRAD: Unsupervised Domain Adaptation by Backpropagation, Ganin & Lemptsky (2014)
 """
-import torch
 from torch import nn
-import torch.nn.functional as F
-
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+from torch.autograd import Function
 
 class Encoder(nn.Module):
-    """LeNet feature extractor model"""
 
     def __init__(self):
         super().__init__()
@@ -27,25 +23,25 @@ class Encoder(nn.Module):
                 nn.MaxPool2d(kernel_size=2),
                 nn.ReLU()
                 )
-        self.fc1 = nn.Linear(50 * 4 * 4, 500)
 
     def forward(self, x):
-        out = self.feature_extractor(x)
-        features = self.fc1(out.view(-1, 50 * 4 * 4))
+        features = self.feature_extractor(x)
         return features
 
 class Classifier(nn.Module):
-    """LeNet Classifier model"""
-    
+
     def __init__(self):
         super().__init__()
         self.pretrained = False
-        self.fc2 = nn.Linear(500, 10)
+        self.layers = nn.Sequential(
+                nn.Linear(50 * 4 * 4, 500),
+                nn.ReLU(),
+                nn.Dropout(),
+                nn.Linear(500, 10)
+                )
 
     def forward(self, x):
-        out = F.relu(x)
-        out = F.dropout(out, training=self.training)
-        out = self.fc2(out)
+        out = self.layers(x.view(-1, 50 * 4 * 4))
         return out
 
 """
@@ -62,9 +58,22 @@ class Discriminator(nn.Module):
             nn.Linear(h_dims, h_dims),
             nn.ReLU(),
             nn.Linear(h_dims, out_dims),
-            nn.LogSoftmax()
+            nn.LogSoftmax(dim=1)
         )
 
-    def forward(self, X):
-        out = self.layers(X)
+    def forward(self, x):
+        out = self.layers(x.view(-1, 50 * 4 * 4))
         return out
+
+
+class ReverseLayerF(Function):
+
+    @staticmethod
+    def forward(ctx, x, alpha):
+        ctx.alpha = alpha
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        output = grad_output.neg() * ctx.alpha
+        return output, None

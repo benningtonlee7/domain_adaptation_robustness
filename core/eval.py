@@ -4,7 +4,7 @@ import params
 from utils.utils import make_variable, normalize
 from core.pgd import attack_pgd
 
-def eval_src_robust(encoder, classifier, data_loader):
+def eval_tgt_robust(encoder, classifier, data_loader):
 
     # Set eval state for Dropout and BN layers
     encoder.eval()
@@ -22,7 +22,7 @@ def eval_src_robust(encoder, classifier, data_loader):
         images = make_variable(images, volatile=True)
         labels = make_variable(labels)
 
-        delta = attack_pgd(encoder, images, labels)
+        delta = attack_pgd(encoder, classifier, images, labels)
         delta = delta.detach()
 
         # Compute loss for critic
@@ -34,19 +34,19 @@ def eval_src_robust(encoder, classifier, data_loader):
         out = classifier(encoder(images))
         loss += criterion(out, labels).item()
 
-        test_robust_acc += torch.sum(robust_preds.max(1)[1] == labels.data)
-        acc += torch.sum(out.max(1)[1] == labels.data)
+        test_robust_acc += torch.sum(robust_preds.max(1)[1] == labels.data).double()
+        acc += torch.sum(out.max(1)[1] == labels.data).double()
 
     loss /= len(data_loader)
     test_robust_loss /= len(data_loader)
-    acc = acc.double() / len(data_loader.dataset)
-    test_robust_acc = test_robust_acc.double() / len(data_loader.dataset)
+    acc = acc / len(data_loader.dataset)
+    test_robust_acc = test_robust_acc / len(data_loader.dataset)
 
-    print("Avg Evaluation Loss: {:4f}, Avg Evaluation Accuracy: {:4f%}, Ave Evaluation Robust Loss: {:4f}, "
+    print("Avg Evaluation Loss: {:.4f}, Avg Evaluation Accuracy: {:.4%}, Ave Evaluation Robust Loss: {:.4f}, "
           "Ave Robust Accuracy: {:.4%}".format(loss, acc, test_robust_loss, test_robust_acc))
 
 
-def eval_src(encoder, classifier, data_loader):
+def eval_tgt(encoder, classifier, data_loader):
     """Evaluate classifier for source domain."""
     # Set eval state for Dropout and BN layers
     encoder.eval()
@@ -66,37 +66,9 @@ def eval_src(encoder, classifier, data_loader):
         out = classifier(encoder(images))
         loss += criterion(out, labels).item()
         _, preds = torch.max(out, 1)
-        acc += torch.sum(preds == labels.data)
+        acc += torch.sum(preds == labels.data).double()
 
     loss /= len(data_loader)
-    acc = acc.double() / len(data_loader.dataset)
+    acc = acc / len(data_loader.dataset)
 
-    print("Avg Evaluation Loss: {:4f}, Avg Evaluation Accuracy: {:.4%}".format(loss, acc))
-
-def eval_tgt(encoder, classifier, data_loader):
-    """Evaluation for target encoder by source classifier on target dataset."""
-    # Set eval state for Dropout and BN layers
-    encoder.eval()
-    classifier.eval()
-
-    # Init loss and accuracy
-    loss, acc = 0, 0
-
-    # Set loss function
-    criterion = nn.CrossEntropyLoss()
-
-    # Evaluate network
-    for (images, labels) in data_loader:
-        images = make_variable(images, volatile=True)
-        labels = make_variable(labels).squeeze_()
-
-        out = classifier(encoder(images))
-        loss += criterion(out, labels).item()
-        _, preds = torch.max(out, 1)
-
-        acc += torch.sum(preds == labels.data)
-
-    loss /= len(data_loader)
-    acc = acc.double() / len(data_loader.dataset)
-
-    print("Avg Evaluation Loss: {:4f}, Avg Accuracy: {:.4%}".format(loss, acc))
+    print("Avg Evaluation Loss: {:.4f}, Avg Evaluation Accuracy: {:.4%}".format(loss, acc))

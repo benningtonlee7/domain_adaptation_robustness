@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from utils.utils import clamp, normalize
 import torch
 
-def attack_pgd(model, X, y, epsilon=params.epsilon, alpha=params.pgd_alpha,
+def attack_pgd(encoder, classifier, X, y, epsilon=params.epsilon, alpha=params.pgd_alpha,
                attack_iters=params.attack_iters, restarts=params.restarts,
                norm=params.norm, early_stop=params.early_stop, clamps=params.clamps):
 
@@ -23,7 +23,7 @@ def attack_pgd(model, X, y, epsilon=params.epsilon, alpha=params.pgd_alpha,
         delta = clamp(delta, clamps[0]-X, clamps[1]-X)
         delta.requires_grad = True
         for _ in range(attack_iters):
-            output = model(normalize(X + delta))
+            output = classifier(encoder((normalize(X + delta))))
             if early_stop:
                 index = torch.where(output.max(1)[1] == y)[0]
             else:
@@ -46,7 +46,7 @@ def attack_pgd(model, X, y, epsilon=params.epsilon, alpha=params.pgd_alpha,
             delta.data[index, :, :, :] = d
             delta.grad.zero_()
 
-        all_loss = F.cross_entropy(model(normalize(X+delta)), y, reduction='none')
+        all_loss = F.cross_entropy(classifier(encoder(normalize(X+delta))), y, reduction='none')
         max_delta[all_loss >= max_loss] = delta.detach()[all_loss >= max_loss]
         max_loss = torch.max(max_loss, all_loss)
 

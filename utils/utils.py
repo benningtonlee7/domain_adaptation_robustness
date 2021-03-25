@@ -66,7 +66,7 @@ def normalize(X, std=params.dataset_std_value, mean=params.dataset_mean_value):
     return (X - mean)/std
 
 
-def model_init(model, restore):
+def model_init(model, restore=None):
     model.apply(init_weights)
     # Load state dict
     if restore and os.path.exists(restore):
@@ -99,11 +99,10 @@ def update_lr(optimizer, lr):
         g.update(lr=lr)
 
 
-def save_model(net, filename):
+def save_model(model, model_root, filename):
     
-    if not os.path.exists(params.model_root):
-        os.makedirs(params.model_root)
-    torch.save(net.state_dict(),
-               os.path.join(params.model_root, filename))
-    print("save pretrained model to: {}".format(os.path.join(params.model_root,
-                                                             filename)))
+    if not os.path.exists(model_root):
+        os.makedirs(model_root)
+    torch.save(model.state_dict(),
+               os.path.join(model_root, filename))
+    print("Save model to: {}".format(os.path.join(model_root, filename)))

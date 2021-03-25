@@ -1,4 +1,3 @@
-"""Pre-train encoder and classifier for source dataset."""
 import os
 import time
 import torch
@@ -6,12 +5,13 @@ import torch.nn as nn
 import torch.optim as optim
 import params
 from utils.utils import make_variable, save_model, normalize, lr_schedule, gradient_penalty, update_lr
-from core.eval import eval_src, eval_tgt, eval_src_robust
+from core.eval import eval_tgt, eval_tgt_robust
 from core.pgd import attack_pgd
-
+from models.models import ReverseLayerF
+import numpy as np
 
 def train_src_adda(encoder, classifier, data_loader):
-    """Train classifier for source domain."""
+    """Train classifier for source domain for ADDA"""
     # Step 1: Network setup
     # Set train state for both Dropout and BN layers
     encoder.train()
@@ -23,12 +23,10 @@ def train_src_adda(encoder, classifier, data_loader):
         lr=params.c_learning_rate,
         betas=(params.beta1, params.beta2))
     criterion = nn.CrossEntropyLoss()
-    # Alternative
-    # criterion = nn.BCEWithLogitsLoss()
 
     # Step 2: Pretrain the source model
     for epoch in range(params.num_epochs_pre):
-        train_acc, train_n = 0, 0
+        train_acc, train_loss, train_n = 0, 0, 0
         start_time = time.time()
 
         for step, (images, labels) in enumerate(data_loader):
@@ -40,7 +38,7 @@ def train_src_adda(encoder, classifier, data_loader):
             # Zero gradients for optimizer
             optimizer.zero_grad()
 
-            # Compute loss for critic
+            # Compute loss for classifier
             preds = classifier(encoder(images))
             loss = criterion(preds, labels)
 
@@ -48,39 +46,42 @@ def train_src_adda(encoder, classifier, data_loader):
             loss.backward()
             optimizer.step()
 
-            train_acc += torch.sum(preds.max(1)[1] == labels.data)
+            train_loss += loss.item() * labels.size(0)
+            train_acc += torch.sum(preds.max(1)[1] == labels.data).double()
             train_n += labels.size(0)
 
             # Print step info
             if ((step + 1) % params.log_step_pre == 0):
-                print("Epoch [{}/{}] Step [{}/{}] Training Loss: {:.4f} Training Accuracy: {:.4%}"
+                print("Epoch [{}/{}] Step [{}/{}]: Training Loss: {:.4f} Training Accuracy: {:.4%}"
                       .format(epoch + 1,
                               params.num_epochs_pre,
                               step + 1,
                               len(data_loader),
-                              loss.item(),
-                              train_acc/train_n))
+                              train_loss / train_n,
+                              train_acc / train_n))
         time_elapsed = time.time() - start_time
 
         # Eval model on test set
         if ((epoch + 1) % params.eval_step_pre == 0):
-            eval_src(encoder, classifier, data_loader)
+            eval_tgt(encoder, classifier, data_loader)
 
         # Save model parameters
         if ((epoch + 1) % params.save_step_pre == 0):
-            print('Epoch [{}/{}] complete in {:.0f}m {:.0f}s'.format(epoch + 1,
-                    params.num_epochs, time_elapsed // 60, time_elapsed % 60))
-            save_model(encoder, "{}-source-encoder-{}.pt".format("ADDA", epoch + 1))
-            save_model(classifier, "{}-source-classifier-{}.pt".format("ADDA", epoch + 1))
+            print('Epoch [{}/{}] completed in {:.0f}m {:.0f}s'.format(epoch + 1,
+                                                                     params.num_epochs, time_elapsed // 60,
+                                                                     time_elapsed % 60))
+            save_model(encoder, params.adda_root, "ADDA-source-encoder-{}.pt".format(epoch + 1))
+            save_model(classifier, params.adda_root, "ADDA-source-classifier-{}.pt".format(epoch + 1))
 
     # Save final model
-    save_model(encoder, "{}-source-encoder-final.pt".format("ADDA"))
-    save_model(classifier, "{}-source-classifier-final.pt".format("ADDA"))
+    save_model(encoder, params.adda_root, "ADDA-source-encoder-final.pt")
+    save_model(classifier, params.adda_root, "ADDA-source-classifier-final.pt")
 
     return encoder, classifier
 
+
 def train_src_robust(encoder, classifier, data_loader):
-    """Train classifier for source domain with robust training"""
+    """Train classifier for source domain with robust training for ADDA"""
 
     # Step 1: Network setup
     # Set train state for both Dropout and BN layers
@@ -112,10 +113,10 @@ def train_src_robust(encoder, classifier, data_loader):
             optimizer.zero_grad()
 
             # Update lr - using piecewise lr scheduler from "Overfitting in adversarially robust deep learning"
-            lr = lr_schedule(epoch + 1, params.num_epochs)
-            update_lr(optimizer, lr)
+            # lr = lr_schedule(epoch + 1, params.num_epochs)
+            # update_lr(optimizer, lr)
 
-            delta = attack_pgd(encoder, images, labels)
+            delta = attack_pgd(encoder, classifier, images, labels)
 
             # Compute loss for critic with attack img
             robust_images = normalize(torch.clamp(images + delta[:images.size(0)],
@@ -132,43 +133,45 @@ def train_src_robust(encoder, classifier, data_loader):
             loss = criterion(preds, labels)
 
             train_robust_loss += robust_loss.item() * labels.size(0)
-            train_robust_acc += torch.sum(robust_preds.max(1)[1] == labels)
+            train_robust_acc += torch.sum(robust_preds.max(1)[1] == labels).double()
             train_loss += loss.item() * labels.size(0)
-            train_acc += torch.sum(preds.max(1)[1] == labels.data)
+            train_acc += torch.sum(preds.max(1)[1] == labels.data).double()
             train_n += labels.size(0)
 
             # Print step info
             if ((step + 1) % params.log_step_pre == 0):
-                print("Epoch [{}/{}] Step [{}/{}] Avg Training loss: {:4f} Avg Training Accuracy: {:.4%}"
-                      " Avg Robust Training Loss: {:4f} Avg Robust Training Accuracy: {:.4%}".format(epoch + 1,
-                              params.num_epochs_pre,
-                              step + 1,
-                              len(data_loader),
-                              train_loss/train_n * 1.0,
-                              train_acc.double()/train_n,
-                              train_robust_loss/train_n,
-                              train_robust_acc.double()/train_n))
+                print("Epoch [{}/{}] Step [{}/{}]: Avg Training loss: {:.4f} Avg Training Accuracy: {:.4%}"
+                      " Avg Robust Training Loss: {:.4f} Avg Robust Training Accuracy: {:.4%}".format(epoch + 1,
+                                                                                     params.num_epochs_pre,
+                                                                                     step + 1,
+                                                                                     len(data_loader),
+                                                                                     train_loss/train_n,
+                                                                                     train_acc/train_n,
+                                                                                     train_robust_loss/train_n,
+                                                                                     train_robust_acc/train_n))
         time_elapsed = time.time() - start_time
 
         # Eval model on test set
         if ((epoch + 1) % params.eval_step_pre == 0):
-            eval_src_robust(encoder, classifier, data_loader)
+            eval_tgt_robust(encoder, classifier, data_loader)
 
         # Save model parameters
         if ((epoch + 1) % params.save_step_pre == 0):
-            print('Epoch [{}/{}] complete in {:.0f}m {:.0f}s'.format(epoch + 1,
-                    params.num_epochs, time_elapsed // 60, time_elapsed % 60))
-            save_model(encoder, "{}-source-encoder-robust-{}.pt".format("ADDA", epoch + 1))
-            save_model(classifier, "{}-source-classifier-robust-{}.pt".format("ADDA", epoch + 1))
+            print('Epoch [{}/{}] completed in {:.0f}m {:.0f}s'.format(epoch + 1,
+                                                                     params.num_epochs, time_elapsed // 60,
+                                                                     time_elapsed % 60))
+            save_model(encoder, params.adda_root, "ADDA-source-encoder-rb-{}.pt".format(epoch + 1))
+            save_model(classifier, params.adda_root, "ADDA-source-classifier-rb-{}.pt".format(epoch + 1))
 
     # Save final model
-    save_model(encoder, "ADDA-source-encoder-final-robust.pt")
-    save_model(classifier, "ADDA-source-classifier-final-robust.pt")
+    save_model(encoder, params.adda_root, "ADDA-source-encoder-rb-final.pt")
+    save_model(classifier, params.adda_root, "ADDA-source-classifier-rb-final.pt")
 
     return encoder, classifier
 
+
 def train_tgt_adda(src_encoder, tgt_encoder, critic, src_data_loader, tgt_data_loader, robust=False):
-    """Train adda encoder for target domain."""
+    """Train adda encoder for target domain for ADDA"""
 
     # Step 1:  Network Setup
     # Set train state for Dropout and BN layers
@@ -181,7 +184,7 @@ def train_tgt_adda(src_encoder, tgt_encoder, critic, src_data_loader, tgt_data_l
                                lr=params.c_learning_rate,
                                betas=(params.beta1, params.beta2))
     optimizer_critic = optim.Adam(critic.parameters(),
-                                  lr=params.d_learning_rate,
+                                  lr=params.c_learning_rate,
                                   betas=(params.beta1, params.beta2))
     len_data_loader = min(len(src_data_loader), len(tgt_data_loader))
 
@@ -189,8 +192,10 @@ def train_tgt_adda(src_encoder, tgt_encoder, critic, src_data_loader, tgt_data_l
     for epoch in range(params.num_epochs):
 
         start_time = time.time()
+        train_disc_loss, train_disc_acc, train_n = 0, 0, 0
         # Zip source and target data pair
         data_zip = enumerate(zip(src_data_loader, tgt_data_loader))
+
         for step, ((images_src, _), (images_tgt, _)) in data_zip:
 
             # 2.1 train discriminator with fixed src_encoder
@@ -205,17 +210,18 @@ def train_tgt_adda(src_encoder, tgt_encoder, critic, src_data_loader, tgt_data_l
 
             if robust:
                 # Update lr - using piecewise lr scheduler from "Overfitting in adversarially robust deep learning"
-                lr = lr_schedule(epoch + 1, params.num_epochs)
-                update_lr(optimizer_tgt, lr)
-                update_lr(optimizer_critic, lr)
-                # Here, we attack imgs with domain labels
-                delta_src = attack_pgd(src_encoder, images_src, label_src)
-                delta_tgt = attack_pgd(tgt_encoder, images_tgt, label_tgt)
+                # lr = lr_schedule(epoch + 1, params.num_epochs)
+                # update_lr(optimizer_tgt, lr)
+                # update_lr(optimizer_critic, lr)
+                # Attack imgs with domain labels
+                delta_src = attack_pgd(src_encoder, critic, images_src, label_src)
+                delta_tgt = attack_pgd(tgt_encoder, critic, images_tgt, label_tgt)
 
                 robust_src = normalize(torch.clamp(images_src + delta_src[:images_src.size(0)],
-                                                      min=params.lower_limit, max=params.upper_limit))
-                robust_tgt = normalize(torch.clamp(images_tgt + delta_tgt[:images_src.size(0)],
-                                                      min=params.lower_limit, max=params.upper_limit))
+                                                   min=params.lower_limit, max=params.upper_limit))
+                robust_tgt = normalize(torch.clamp(images_tgt + delta_tgt[:images_tgt.size(0)],
+                                                   min=params.lower_limit, max=params.upper_limit))
+
             # Zero gradients for optimizer for the discriminator
             optimizer_critic.zero_grad()
 
@@ -230,14 +236,14 @@ def train_tgt_adda(src_encoder, tgt_encoder, critic, src_data_loader, tgt_data_l
             # Compute loss for critic
             loss_critic = criterion(pred_concat, label_concat)
             loss_critic.backward()
+            train_disc_loss += loss_critic.item() * label_concat.size(0)
+            train_disc_acc += torch.sum(pred_concat.max(1)[1] == label_concat.data).double()
+            train_n += label_concat.size(0)
 
             # Optimize critic
             optimizer_critic.step()
 
-            pred_cls = torch.squeeze(pred_concat.max(1)[1])
-            acc = (pred_cls == label_concat).float().mean()
-
-            # 2.2 Train target encoder #
+            # 2.2 Train target encoder
             # Zero gradients for optimizer
             optimizer_critic.zero_grad()
             optimizer_tgt.zero_grad()
@@ -247,10 +253,10 @@ def train_tgt_adda(src_encoder, tgt_encoder, critic, src_data_loader, tgt_data_l
 
             if robust:
                 # Attack the target images with domain labels
-                delta_tgt = attack_pgd(src_encoder, images_tgt, label_tgt)
-                images_tgt = normalize(torch.clamp(images_tgt + delta_tgt[:images_src.size(0)],
-                                                      min=params.lower_limit, max=params.upper_limit))
-                images_tgt.detach()
+                delta_tgt = attack_pgd(tgt_encoder, critic, images_tgt, label_tgt)
+                images_tgt = normalize(torch.clamp(images_tgt + delta_tgt[:images_tgt.size(0)],
+                                                   min=params.lower_limit, max=params.upper_limit))
+
             # Extract and target features
             feat_tgt = tgt_encoder(images_tgt)
 
@@ -267,28 +273,33 @@ def train_tgt_adda(src_encoder, tgt_encoder, critic, src_data_loader, tgt_data_l
             # 2.3 Print step info
             if ((step + 1) % params.log_step == 0):
                 print("Epoch [{}/{}] Step [{}/{}]:"
-                      "Avg Discriminator Loss: {:4f} Avg Tgt Discriminator loss: {:4f} Avg accuracy: {:.4%}"
-                      .format(epoch + 1, params.num_epochs, step + 1, len_data_loader, loss_critic.item(),
-                              loss_tgt.item(), acc.item()))
+                      "Avg Discriminator Loss: {:.4f} Avg Discriminator Accuracy: {:.4%}"
+                      .format(epoch + 1, params.num_epochs, step + 1, len_data_loader, train_disc_loss / train_n,
+                              train_disc_acc / train_n))
 
         time_elapsed = time.time() - start_time
 
         # 2.4 Save model parameters #
         if ((epoch + 1) % params.save_step == 0):
-            print('Epoch [{}/{}] complete in {:.0f}m {:.0f}s'.format(epoch + 1,
-                              params.num_epochs, time_elapsed // 60, time_elapsed % 60))
-            torch.save(critic.state_dict(), os.path.join(
-                params.model_root,
-                "{}-critic-{}.pt".format("ADDA", epoch + 1)))
-            torch.save(tgt_encoder.state_dict(), os.path.join(
-                params.model_root,
-                "{}-target-encoder-{}.pt".format("ADDA", epoch + 1)))
+            print('Epoch [{}/{}] completec in {:.0f}m {:.0f}s'.format(epoch + 1,
+                                                                     params.num_epochs, time_elapsed // 60,
+                                                                     time_elapsed % 60))
+            filename = "ADDA-critic-{}.pt".format(epoch + 1) if not robust \
+                else "ADDA-critic-rb-{}.pt".format(epoch + 1)
+            torch.save(critic.state_dict(), params.adda_root, os.path.join(params.model_root, filename))
 
-    torch.save(critic.state_dict(), os.path.join(
-        params.model_root, "ADDA-critic-final.pt"))
-    torch.save(tgt_encoder.state_dict(), os.path.join(
-        params.model_root,"ADDA-target-encoder-final.pt"))
+            filename = "ADDA-target-encoder-{}.pt".format(epoch + 1) if not robust \
+                else "ADDA-target-encoder-rb-{}.pt".format(epoch + 1)
+            torch.save(tgt_encoder.state_dict(), params.adda_root, os.path.join(params.model_root, filename))
+
+    filename = "ADDA-critic-final.pt" if not robust else "ADDA-critic-rb-final.pt"
+    torch.save(critic.state_dict(), os.path.join(params.adda_root, filename))
+
+    filename = "ADDA-target-encoder-final.pt" if not robust else "ADDA-target-encoder-rb-final.pt"
+    torch.save(tgt_encoder.state_dict(), os.path.join(params.adda_root, filename))
+
     return tgt_encoder
+
 
 def train_critic_wdgrl(encoder, critic, src_data_loader, tgt_data_loader):
     """Train domain critic for wdgrl."""
@@ -299,9 +310,8 @@ def train_critic_wdgrl(encoder, critic, src_data_loader, tgt_data_loader):
 
     # Init optimizer and criterion
     optimizer = optim.Adam(critic.parameters(),
-                    lr=params.c_learning_rate,
-                    betas=(params.beta1, params.beta2))
-    criterion = nn.CrossEntropyLoss()
+                           lr=params.c_learning_rate,
+                           betas=(params.beta1, params.beta2))
     len_data_loader = min(len(src_data_loader), len(tgt_data_loader))
 
     for epoch in range(params.num_epochs_wdgrl_pre):
@@ -312,6 +322,11 @@ def train_critic_wdgrl(encoder, critic, src_data_loader, tgt_data_loader):
         data_zip = enumerate(zip(src_data_loader, tgt_data_loader))
 
         for step, ((images_src, _), (images_tgt, _)) in data_zip:
+
+            if images_src.size(0) > images_tgt.size(0):
+                images_src = images_src.narrow(0, 0, images_tgt.size(0))
+            elif images_src.size(0) < images_tgt.size(0):
+                images_tgt = images_tgt.narrow(0, 0, images_src.size(0))
 
             # Make images and labels variable
             images_src = make_variable(images_src)
@@ -331,6 +346,8 @@ def train_critic_wdgrl(encoder, critic, src_data_loader, tgt_data_loader):
 
             # Compute cost for critic
             critic_cost = -wasserstein_distance + params.wd_clf * gp
+            critic_loss += critic_cost.item() * images_tgt.size(0)
+            train_n += images_tgt.size(0)
 
             # Optimize critic
             critic_cost.backward()
@@ -338,46 +355,53 @@ def train_critic_wdgrl(encoder, critic, src_data_loader, tgt_data_loader):
 
             # Print step info
             if ((step + 1) % params.log_step_pre == 0):
-                print("Epoch [{}/{}] Step [{}/{}] Training Critic Cost: {:.4f}"
+                print("Epoch [{}/{}] Step [{}/{}]: Training Critic Cost: {:.4f}"
                       .format(epoch + 1,
-                              params.num_epochs_pre,
+                              params.num_epochs_wdgrl_pre,
                               step + 1,
                               len_data_loader,
-                              critic_cost.item()))
+                              critic_loss / train_n))
 
         time_elapsed = time.time() - start_time
 
         # Save critic parameters
         if ((epoch + 1) % params.save_step_pre == 0):
-            print('Epoch [{}/{}] complete in {:.0f}m {:.0f}s'.format(epoch + 1,
-                              params.num_epochs_wdgrl_pre, time_elapsed // 60, time_elapsed % 60))
-            save_model(critic, "wdgrl_critic-{}.pt".format(epoch + 1))
+            print('Epoch [{}/{}] completed in {:.0f}m {:.0f}s'.format(epoch + 1,
+                                                                     params.num_epochs_wdgrl_pre, time_elapsed // 60,
+                                                                     time_elapsed % 60))
+            save_model(critic, params.wdgrl_root, "WDGRL-critic-{}.pt".format(epoch + 1))
 
     # Save final model
-    save_model(encoder, "wdgrl_critic-final.pt")
+    save_model(critic, params.wdgrl_root, "WDGRL-critic-final.pt")
 
     return critic
 
-def train_tgt_wdgrl(encoder, clf, critic, src_data_loader, tgt_data_loader, robust=False):
 
+def train_tgt_wdgrl(encoder, classifier, critic, src_data_loader, tgt_data_loader, robust=False):
     # Set state
     encoder.train()
     critic.eval()
 
     # Setup criterion and optimizer
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(list(encoder.parameters()) + list(clf.parameters()),
-                               lr=params.c_learning_rate,
-                               betas=(params.beta1, params.beta2))
+    optimizer = optim.Adam(list(encoder.parameters()) + list(classifier.parameters()),
+                           lr=params.c_learning_rate,
+                           betas=(params.beta1, params.beta2))
     len_data_loader = min(len(src_data_loader), len(tgt_data_loader))
 
     # Step 2 Train network
     for epoch in range(params.num_epochs):
-        ave_loss, train_n, train_acc = 0, 0, 0
+        train_acc, train_loss, train_n = 0, 0, 0
         start_time = time.time()
         # Zip source and target data pair
         data_zip = enumerate(zip(src_data_loader, tgt_data_loader))
         for step, ((images_src, labels_src), (images_tgt, _)) in data_zip:
+
+            if images_src.size(0) > images_tgt.size(0):
+                images_src = images_src.narrow(0, 0, images_tgt.size(0))
+                labels_src = labels_src.narrow(0, 0, images_tgt.size(0))
+            elif images_src.size(0) < images_tgt.size(0):
+                images_tgt = images_tgt.narrow(0, 0, images_src.size(0))
 
             images_src = make_variable(images_src)
             images_tgt = make_variable(images_tgt)
@@ -385,55 +409,264 @@ def train_tgt_wdgrl(encoder, clf, critic, src_data_loader, tgt_data_loader, robu
 
             if robust:
                 # Update lr - using piecewise lr scheduler from "Overfitting in adversarially robust deep learning"
-                lr = lr_schedule(epoch + 1, params.num_epochs)
-                update_lr(optimizer, lr)
+                # lr = lr_schedule(epoch + 1, params.num_epochs)
+                # update_lr(optimizer, lr)
                 # PDG attack on the source image
-                delta_src = attack_pgd(encoder, images_src, labels_src)
+                delta_src = attack_pgd(encoder, classifier, images_src, labels_src)
 
                 robust_src = normalize(torch.clamp(images_src + delta_src[:images_src.size(0)],
-                                                      min=params.lower_limit, max=params.upper_limit))
-
+                                                   min=params.lower_limit, max=params.upper_limit))
 
             feat_src = encoder(images_src) if not robust else encoder(robust_src)
             feat_tgt = encoder(images_tgt)
 
-            preds_src = clf(feat_src)
+            preds_src = classifier(feat_src)
             clf_loss = criterion(preds_src, labels_src)
             wasserstein_distance = critic(feat_src).mean() - critic(feat_tgt).mean()
 
             loss = clf_loss + params.wd_clf * wasserstein_distance
+            train_loss += loss.item() * labels_src.size(0)
+            train_n += labels_src.size(0)
+            train_acc += torch.sum(preds_src.max(1)[1] == labels_src.data).double()
+
             optimizer.zero_grad()
             loss.backward()
-            ave_loss += loss.item()
-            train_n += images_src.size(0)
-            train_acc += torch.sum(preds_src.max(1)[1] == labels_src.data)
             optimizer.step()
 
             if ((step + 1) % params.log_step == 0):
-                print("Epoch [{}/{}] Step [{}/{}]: Avg Training loss: {:4f} Ave Training Accuracy {:.4%}"
+                print("Epoch [{}/{}] Step [{}/{}]: Avg Training loss: {:.4f} Ave Training Accuracy {:.4%}"
                       .format(epoch + 1,
                               params.num_epochs,
                               step + 1,
                               len_data_loader,
-                              ave_loss/train_n,
+                              train_loss/train_n,
                               train_acc/train_n))
 
         time_elapsed = time.time() - start_time
 
         # 2.4 Save model parameters #
         if ((epoch + 1) % params.save_step == 0):
-            print('Epoch [{}/{}] complete in {:.0f}m {:.0f}s'.format(epoch + 1,
+            print('Epoch [{}/{}] completed in {:.0f}m {:.0f}s'.format(epoch + 1,
                                                                      params.num_epochs, time_elapsed // 60,
                                                                      time_elapsed % 60))
-            torch.save(encoder.state_dict(), os.path.join(
-                params.model_root, "wdgrl-encoder-{}.pt".format(encoder, epoch + 1)))
-            torch.save(clf.state_dict(), os.path.join(
-                params.model_root, "wdgrl-clf-{}.pt".format(clf, epoch + 1)))
+            filename = "WDGRL-encoder-{}.pt".format(epoch + 1) if not robust \
+                else "WDGRL-encoder-rb-{}.pt".format(epoch + 1)
+            torch.save(encoder.state_dict(), os.path.join(params.wdgrl_root, filename))
 
-    torch.save(clf.state_dict(), os.path.join(
-        params.model_root, "wdgrl-clf-final.pt"))
-    torch.save(encoder.state_dict(), os.path.join(
-        params.model_root, "wdgrl-encoder-final.pt"))
+            filename = "WDGRL-classifier-{}.pt".format(epoch + 1) if not robust \
+                else "WDGRL-classifier-rb-{}.pt".format(epoch + 1)
+            torch.save(classifier.state_dict(), os.path.join(params.wdgrl_root, filename))
 
-    return encoder, clf
+    filename = "WDGRL-classifier-final.pt" if not robust else "WDGRL-classifier-rb-final.pt"
+    torch.save(classifier.state_dict(), os.path.join(params.wdgrl_root, filename))
+
+    filename = "WDGRL-encoder-final.pt" if not robust else "WDGRL-encoder-rb-final.pt"
+    torch.save(encoder.state_dict(), os.path.join(params.wdgrl_root, filename))
+
+    return encoder, classifier
+
+
+def train_revgard(encoder, classifier, critic, src_data_loader, tgt_data_loader, robust=True):
+    # Step 1: Network setup
+    # Set train state for both Dropout and BN layers
+    encoder.train()
+    classifier.train()
+
+    # Set up optimizer and criterion
+    optimizer = optim.Adam(
+        list(encoder.parameters()) + list(classifier.parameters()) + list(critic.parameters()),
+        lr=params.c_learning_rate,
+        betas=(params.beta1, params.beta2))
+
+    len_data_loader = min(len(src_data_loader), len(tgt_data_loader))
+    clf_criterion = nn.CrossEntropyLoss()
+    domain_criterion = nn.BCEWithLogitsLoss()
+
+    # Step 2: Train model
+    for epoch in range(params.num_epochs):
+
+        # Init accuracy and loss
+        start_time = time.time()
+        train_clf_loss, train_clf_acc, train_n = 0, 0, 0
+        train_domain_loss, train_domain_acc, train_domain_n = 0, 0, 0
+        data_zip = enumerate(zip(src_data_loader, tgt_data_loader))
+
+        for step, ((images_src, labels_src), (images_tgt, _)) in data_zip:
+
+            # Make images and labels variable
+            images_src = make_variable(images_src)
+            images_tgt = make_variable(images_tgt)
+            labels_src = make_variable(labels_src.squeeze_())
+            images_concat = torch.cat((images_src, images_tgt), 0)
+
+            # Zero gradients for optimizer
+            optimizer.zero_grad()
+
+            # Prepare real and fake label (domain labels)
+            label_src = make_variable(torch.ones(images_src.size(0)).long())
+            label_tgt = make_variable(torch.zeros(images_tgt.size(0)).long())
+            label_concat = torch.cat((label_src, label_tgt), 0)
+
+            if robust:
+                delta_concat = attack_pgd(encoder, critic, images_concat, label_concat)
+                delta_src = attack_pgd(encoder, classifier, images_src, labels_src)
+                robust_concat = normalize(torch.clamp(images_concat + delta_concat[:images_concat.size(0)],
+                                                      min=params.lower_limit, max=params.upper_limit))
+                robust_src = normalize(torch.clamp(images_src + delta_src[:images_src.size(0)],
+                                                   min=params.lower_limit, max=params.upper_limit))
+
+            preds_domain = critic(encoder(images_concat)) if not robust else critic(encoder(robust_concat))
+            preds_clf = classifier(encoder(images_src)) if not robust else classifier(encoder(robust_src))
+
+            domain_loss = domain_criterion(preds_domain.max(1)[1].float(), label_concat.float())
+            clf_loss = clf_criterion(preds_clf, labels_src)
+            loss = domain_loss + clf_loss
+
+            # Optimize model
+            loss.backward()
+            optimizer.step()
+
+            train_clf_loss += clf_loss.item() * images_src.size(0)
+            train_domain_loss += domain_loss.item() * images_concat.size(0)
+            train_domain_acc += torch.sum(preds_domain.max(1)[1] == label_concat.data).double()
+            train_clf_acc += torch.sum(preds_clf.max(1)[1] == labels_src.data).double()
+            train_n += labels_src.size(0)
+            train_domain_n += label_concat.size(0)
+            # Print step info
+            if ((step + 1) % params.log_step == 0):
+                print("Epoch [{}/{}] Step [{}/{}]: Avg Classifier loss: {:.4f} Avg Classifier Accuracy: {:.4%}"
+                      " Avg Domain Loss: {:.4f} Avg Domain Accuracy: {:.4%}".format(epoch + 1,
+                                                                                   params.num_epochs,
+                                                                                   step + 1,
+                                                                                   len_data_loader,
+                                                                                   train_clf_loss/train_n,
+                                                                                   train_clf_acc/train_n,
+                                                                                   train_domain_loss/train_domain_n,
+                                                                                   train_domain_acc/train_domain_n))
+        time_elapsed = time.time() - start_time
+
+        # Save model parameters
+        if ((epoch + 1) % params.save_step == 0):
+            print('Epoch [{}/{}] completed in {:.0f}m {:.0f}s'.format(epoch + 1,
+                                                                      params.num_epochs,
+                                                                      time_elapsed // 60,
+                                                                      time_elapsed % 60))
+            filename = "REVGRAD-encoder-{}.pt".format(epoch + 1) if not robust \
+                else "REVGRAD-encoder-rb-{}.pt".format(epoch + 1)
+            save_model(encoder, params.revgard_root, filename)
+
+            filename = "REVGRAD-classifier-{}.pt".format(epoch + 1) if not robust \
+                else "REVGRAD-classifier-rb-{}.pt".format(epoch + 1)
+            save_model(classifier, params.revgard_root, filename)
+
+    # Save final model
+    filename = "REVGRAD-encoder-final.pt" if not robust else "REVGRAD-encoder-rb-final.pt"
+    save_model(encoder, params.revgard_root, filename)
+    filename = "REVGRAD-classifier-final.pt" if not robust else "REVGRAD-classifier-rb-final.pt"
+    save_model(classifier, params.revgard_root, filename)
+
+    return encoder, classifier
+
+def train_dann_robust(encoder, classifier, critic, src_data_loader, tgt_data_loader, tgt_data_loader_eval, robust=True):
+
+    # 1. Network Setup
+    encoder.train()
+    classifier.train()
+    critic.train()
+    # Set up optimizer and criterion
+    optimizer = optim.SGD(list(encoder.parameters()) + list(classifier.parameters()) + list(critic.parameters()),
+                          lr=params.lr, momentum=params.momentum, weight_decay=params.weight_decay)
+    criterion = nn.CrossEntropyLoss()
+
+    # 2. Train network
+    global_step = 0
+    for epoch in range(params.num_epochs):
+        start_time = time.time()
+        total_loss, train_n = 0, 0
+        train_clf_loss, train_clf_acc, train_clf_n = 0, 0, 0
+        train_domain_loss, train_domain_acc, train_domain_n = 0, 0, 0
+        # Zip source and target data pair
+        len_data_loader = min(len(src_data_loader), len(tgt_data_loader))
+        data_zip = enumerate(zip(src_data_loader, tgt_data_loader))
+
+        for step, ((images_src, labels_src), (images_tgt, _)) in data_zip:
+
+            alpha = 2. / (1. + np.exp(-10 * p)) - 1
+
+            # Make images variable
+            images_src = make_variable(images_src)
+            images_tgt = make_variable(images_tgt)
+            labels_src = make_variable(labels_src.squeeze_())
+
+            # Prepare real and fake label (domain labels)
+            label_src = make_variable(torch.ones(images_src.size(0)).long())
+            label_tgt = make_variable(torch.zeros(images_tgt.size(0)).long())
+
+            # Zero gradients for optimizer
+            optimizer.zero_grad()
+
+            # Train on source domain
+            feats = encoder(images_src)
+            reversed_feats = ReverseLayerF.apply(feats.view(-1, 50 * 4 * 4), alpha)
+            preds_src = classifier(feats)
+            preds_src_domain = critic(reversed_feats)
+            loss_src = criterion(preds_src, labels_src)
+            loss_src_domain = criterion(preds_src_domain, label_src)
+
+            # Train on target domain
+            preds_tgt_domain = critic(encoder(images_tgt))
+            loss_tgt_domain = criterion(preds_tgt_domain, label_tgt)
+
+            loss = loss_src + loss_src_domain + loss_tgt_domain
+
+            train_clf_n += preds_src.size(0)
+            train_domain_n += preds_src_domain.size(0) + preds_tgt_domain.size(0)
+            train_n += train_clf_n + train_domain_n
+
+            total_loss += loss.item() * (preds_src.size(0) + preds_src_domain.size(0) + preds_tgt_domain.size(0))
+            train_clf_loss += loss_src.item() * preds_src.size(0)
+            train_domain_loss += loss_src_domain.item() + loss_tgt_domain.item()
+            train_domain_acc += torch.sum(preds_src_domain.max(1)[1] == label_src.data).double() + \
+                                    torch.sum(preds_tgt_domain.max(1)[1] == label_tgt.data).double()
+            # Optimize model
+            loss.backward()
+            optimizer.step()
+
+            if ((step + 1) % params.log_step == 0):
+                print("Epoch [{}/{}] Step [{}/{}] Avg total loss: {:.4f} Avg Domain Loss: {:.4f}"
+                      " Avg Domain Accuracy: {:.4f%} Avg Classification Loss: {:4f} "
+                      "Avg Classification Accuracy: {:.4%}".format(epoch + 1,
+                                                           params.num_epochs,
+                                                           step + 1,
+                                                           len_data_loader,
+                                                           total_loss /train_n,
+                                                           train_domain_loss / train_domain_n,
+                                                           train_domain_acc/ train_domain_n,
+                                                           train_clf_loss/train_clf_n,
+                                                           train_clf_acc/train_clf_n))
+        time_elapsed = start_time - time.time()
+        # eval model
+        if ((epoch + 1) % params.eval_step == 0):
+            eval_tgt_robust(encoder, classifier, tgt_data_loader_eval)
+
+        # save model parameters
+        if ((epoch + 1) % params.save_step == 0):
+            print('Epoch [{}/{}] completed in {:.0f}m {:.0f}s'.format(epoch + 1,
+                                                                     params.num_epochs,
+                                                                     time_elapsed // 60,
+                                                                     time_elapsed % 60))
+            filename = "DANN-encoder-{}.pt".format(epoch + 1) if not robust \
+                else "DANN-encoder-rb-{}.pt".format(epoch + 1)
+            save_model(encoder, params.dann_root, filename)
+            filename = "DANN-classifier-{}.pt".format(epoch + 1) if not robust \
+                else "DANN-classifier-rb-{}.pt".format(epoch + 1)
+            save_model(classifier, params.dann_root, filename)
+
+    # Save final model
+    filename =  "DANN-encoder-final.pt" if not robust else "DANN-encoder-rb-final.pt"
+    save_model(encoder, params.dann_root, filename)
+    filename =  "DANN-classifier-final.pt" if not robust else "DANN-classifier-rb-final.pt"
+    save_model(classifier, params.dann_root, filename)
+
+    return encoder, classifier
 
