@@ -235,11 +235,10 @@ def train_tgt_adda(src_encoder, tgt_encoder, critic, src_data_loader, tgt_data_l
 
             # Compute loss for critic
             loss_critic = criterion(pred_concat, label_concat)
-            loss_critic.backward()
             train_disc_loss += loss_critic.item() * label_concat.size(0)
             train_disc_acc += torch.sum(pred_concat.max(1)[1] == label_concat.data).double()
             train_n += label_concat.size(0)
-
+            loss_critic.backward()
             # Optimize critic
             optimizer_critic.step()
 
@@ -286,17 +285,17 @@ def train_tgt_adda(src_encoder, tgt_encoder, critic, src_data_loader, tgt_data_l
                                                                      time_elapsed % 60))
             filename = "ADDA-critic-{}.pt".format(epoch + 1) if not robust \
                 else "ADDA-critic-rb-{}.pt".format(epoch + 1)
-            torch.save(critic.state_dict(), params.adda_root, os.path.join(params.model_root, filename))
+            save_model(critic, params.adda_root, filename)
 
             filename = "ADDA-target-encoder-{}.pt".format(epoch + 1) if not robust \
                 else "ADDA-target-encoder-rb-{}.pt".format(epoch + 1)
-            torch.save(tgt_encoder.state_dict(), params.adda_root, os.path.join(params.model_root, filename))
+            save_model(tgt_encoder, params.adda_root, filename)
 
     filename = "ADDA-critic-final.pt" if not robust else "ADDA-critic-rb-final.pt"
-    torch.save(critic.state_dict(), os.path.join(params.adda_root, filename))
+    save_model(critic, params.adda_root, filename)
 
     filename = "ADDA-target-encoder-final.pt" if not robust else "ADDA-target-encoder-rb-final.pt"
-    torch.save(tgt_encoder.state_dict(), os.path.join(params.adda_root, filename))
+    save_model(tgt_encoder, params.adda_root, filename)
 
     return tgt_encoder
 
@@ -391,7 +390,7 @@ def train_tgt_wdgrl(encoder, classifier, critic, src_data_loader, tgt_data_loade
 
     # Step 2 Train network
     for epoch in range(params.num_epochs):
-        train_acc, train_loss, train_n = 0, 0, 0
+        train_acc, train_loss, train_n, total_n = 0, 0, 0, 0
         start_time = time.time()
         # Zip source and target data pair
         data_zip = enumerate(zip(src_data_loader, tgt_data_loader))
@@ -425,7 +424,8 @@ def train_tgt_wdgrl(encoder, classifier, critic, src_data_loader, tgt_data_loade
             wasserstein_distance = critic(feat_src).mean() - critic(feat_tgt).mean()
 
             loss = clf_loss + params.wd_clf * wasserstein_distance
-            train_loss += loss.item() * labels_src.size(0)
+            train_loss += loss.item() * (labels_src.size(0) + images_tgt.size(0))
+            total_n += (labels_src.size(0) + images_tgt.size(0))
             train_n += labels_src.size(0)
             train_acc += torch.sum(preds_src.max(1)[1] == labels_src.data).double()
 
@@ -439,7 +439,7 @@ def train_tgt_wdgrl(encoder, classifier, critic, src_data_loader, tgt_data_loade
                               params.num_epochs,
                               step + 1,
                               len_data_loader,
-                              train_loss/train_n,
+                              train_loss/total_n,
                               train_acc/train_n))
 
         time_elapsed = time.time() - start_time
@@ -451,17 +451,17 @@ def train_tgt_wdgrl(encoder, classifier, critic, src_data_loader, tgt_data_loade
                                                                      time_elapsed % 60))
             filename = "WDGRL-encoder-{}.pt".format(epoch + 1) if not robust \
                 else "WDGRL-encoder-rb-{}.pt".format(epoch + 1)
-            torch.save(encoder.state_dict(), os.path.join(params.wdgrl_root, filename))
+            save_model(encoder, params.wdgrl_root, filename)
 
             filename = "WDGRL-classifier-{}.pt".format(epoch + 1) if not robust \
                 else "WDGRL-classifier-rb-{}.pt".format(epoch + 1)
-            torch.save(classifier.state_dict(), os.path.join(params.wdgrl_root, filename))
+            save_model(classifier, params.wdgrl_root, filename)
 
     filename = "WDGRL-classifier-final.pt" if not robust else "WDGRL-classifier-rb-final.pt"
-    torch.save(classifier.state_dict(), os.path.join(params.wdgrl_root, filename))
+    save_model(classifier, params.wdgrl_root, filename)
 
     filename = "WDGRL-encoder-final.pt" if not robust else "WDGRL-encoder-rb-final.pt"
-    torch.save(encoder.state_dict(), os.path.join(params.wdgrl_root, filename))
+    save_model(encoder, params.wdgrl_root, filename)
 
     return encoder, classifier
 
@@ -597,6 +597,8 @@ def train_dann(encoder, classifier, critic, src_data_loader, tgt_data_loader, tg
 
         for step, ((images_src, labels_src), (images_tgt, _)) in data_zip:
 
+            p = float(step + epoch * len_data_loader) / \
+                params.num_epochs / len_data_loader
             alpha = 2. / (1. + np.exp(-10 * p)) - 1
 
             # Make images variable
@@ -634,13 +636,15 @@ def train_dann(encoder, classifier, critic, src_data_loader, tgt_data_loader, tg
             train_domain_loss += loss_src_domain.item() + loss_tgt_domain.item()
             train_domain_acc += torch.sum(preds_src_domain.max(1)[1] == label_src.data).double() + \
                                     torch.sum(preds_tgt_domain.max(1)[1] == label_tgt.data).double()
+            train_clf_acc += torch.sum(preds_src.max(1)[1] == labels_src.data).double()
+
             # Optimize model
             loss.backward()
             optimizer.step()
 
             if ((step + 1) % params.log_step == 0):
                 print("Epoch [{}/{}] Step [{}/{}] Avg total loss: {:.4f} Avg Domain Loss: {:.4f}"
-                      " Avg Domain Accuracy: {:.4f%} Avg Classification Loss: {:4f} "
+                      " Avg Domain Accuracy: {:.4%} Avg Classification Loss: {:4f} "
                       "Avg Classification Accuracy: {:.4%}".format(epoch + 1,
                                                            params.num_epochs,
                                                            step + 1,
@@ -651,11 +655,11 @@ def train_dann(encoder, classifier, critic, src_data_loader, tgt_data_loader, tg
                                                            train_clf_loss/train_clf_n,
                                                            train_clf_acc/train_clf_n))
         time_elapsed = start_time - time.time()
-        # eval model
+        # Eval model
         if ((epoch + 1) % params.eval_step == 0):
             eval_tgt_robust(encoder, classifier, tgt_data_loader_eval)
 
-        # save model parameters
+        # Save model parameters
         if ((epoch + 1) % params.save_step == 0):
             print('Epoch [{}/{}] completed in {:.0f}m {:.0f}s'.format(epoch + 1,
                                                                      params.num_epochs,

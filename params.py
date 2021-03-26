@@ -27,9 +27,9 @@ disc_adda_rb_path = "snapshots/ADDA/ADDA-critic-rb-final.pt"
 
 # WDGRL
 wdgrl_root = "snapshots/WDGRL"
-disc_wdgrl_path = "snapshots/WDGRL/WDGRL-critic-rb-final.pt"
-encoder_wdgrl_path = "snapshots/WDGRL/WDGRL-encoder-rb-final.pt"
-clf_wdgrl_path = "snapshots/WDGRL/WDGRL-classifier-rb-final.pt"
+disc_wdgrl_path = "snapshots/WDGRL/WDGRL-critic-final.pt"
+encoder_wdgrl_path = "snapshots/WDGRL/WDGRL-encoder-final.pt"
+clf_wdgrl_path = "snapshots/WDGRL/WDGRL-classifier-final.pt"
 
 disc_wdgrl_rb_path = "snapshots/WDGRL/WDGRL-critic-rb-final.pt"
 encoder_wdgrl_rb_path = "snapshots/WDGRL/WDGRL-encoder-rb-final.pt"
@@ -57,7 +57,7 @@ disc_dann_rb_path = "snapshots/REVGRAD/REVGRAD-critic-rb-final.pt"
 
 # Params for training network
 num_epochs_pre = 50
-log_step_pre = 10  # log every # steps
+log_step_pre = 50  # log every # steps
 eval_step_pre = 25  # eval every # epoch
 save_step_pre = 10  # save every # epoch
 num_epochs = 200  # epochs for training

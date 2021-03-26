@@ -23,7 +23,8 @@ def attack_pgd(encoder, classifier, X, y, epsilon=params.epsilon, alpha=params.p
         delta = clamp(delta, clamps[0]-X, clamps[1]-X)
         delta.requires_grad = True
         for _ in range(attack_iters):
-            output = classifier(encoder((normalize(X + delta))))
+            feats = encoder((normalize(X + delta)))
+            output = classifier(feats)
             if early_stop:
                 index = torch.where(output.max(1)[1] == y)[0]
             else:

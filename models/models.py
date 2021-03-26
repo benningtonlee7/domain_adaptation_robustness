@@ -53,7 +53,7 @@ class Discriminator(nn.Module):
         super().__init__()
         self.pretrained = False
         self.layers = nn.Sequential(
-            nn.Linear(in_dims, h_dims),
+            nn.Linear(50 * 4 * 4, in_dims),
             nn.ReLU(),
             nn.Linear(h_dims, h_dims),
             nn.ReLU(),
