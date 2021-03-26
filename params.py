@@ -47,13 +47,13 @@ disc_revgard_rb_path = "snapshots/REVGRAD/REVGRAD-critic-rb-final.pt"
 
 # DANN
 dann_root = "snapshots/DANN"
-tgt_encoder_dann_path = "snapshots/REVGRAD/REVGRAD-encoder-final.pt"
-clf_dann_path = "snapshots/REVGRAD/REVGRAD-classifier-final.pt"
-disc_dann_path = "snapshots/REVGRAD/REVGRAD-critic-final.pt"
+tgt_encoder_dann_path = "snapshots/DANN/DANN-encoder-final.pt"
+clf_dann_path = "snapshots/DANN/DANN-classifier-final.pt"
+disc_dann_path = "snapshots/DANN/DANN-critic-final.pt"
 
-tgt_encoder_dann_rb_path = "snapshots/REVGRAD/REVGRAD-encoder-rb-final.pt"
-clf_dann_rb_path = "snapshots/REVGRAD/REVGRAD-classifier-rb-final.pt"
-disc_dann_rb_path = "snapshots/REVGRAD/REVGRAD-critic-rb-final.pt"
+tgt_encoder_dann_rb_path = "snapshots/DANN/DANN-encoder-rb-final.pt"
+clf_dann_rb_path = "snapshots/DANN/DANN-classifier-rb-final.pt"
+disc_dann_rb_path = "snapshots/DANN/DANN-critic-rb-final.pt"
 
 # Params for training network
 num_epochs_pre = 50
