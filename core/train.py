@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import params
-from utils.utils import make_variable, save_model, normalize, lr_schedule, gradient_penalty, update_lr
+from utils.utils import make_variable, save_model, normalize, lr_piecewise, gradient_penalty, update_lr, lr_scheduler
 from core.eval import eval_tgt, eval_tgt_robust
 from core.pgd import attack_pgd
 from models.models import ReverseLayerF
@@ -271,7 +271,7 @@ def train_tgt_adda(src_encoder, tgt_encoder, critic, src_data_loader, tgt_data_l
 
             # 2.3 Print step info
             if ((step + 1) % params.log_step == 0):
-                print("Epoch [{}/{}] Step [{}/{}]:"
+                print("Epoch [{}/{}] Step [{}/{}]: "
                       "Avg Discriminator Loss: {:.4f} Avg Discriminator Accuracy: {:.4%}"
                       .format(epoch + 1, params.num_epochs, step + 1, len_data_loader, train_disc_loss / train_n,
                               train_disc_acc / train_n))
@@ -601,20 +601,32 @@ def train_dann(encoder, classifier, critic, src_data_loader, tgt_data_loader, tg
                 params.num_epochs / len_data_loader
             alpha = 2. / (1. + np.exp(-10 * p)) - 1
 
+            # Update lr
+            update_lr(optimizer, lr_scheduler(p))
+
             # Make images variable
             images_src = make_variable(images_src)
             images_tgt = make_variable(images_tgt)
             labels_src = make_variable(labels_src.squeeze_())
 
             # Prepare real and fake label (domain labels)
-            label_src = make_variable(torch.ones(images_src.size(0)).long())
-            label_tgt = make_variable(torch.zeros(images_tgt.size(0)).long())
+            label_src = make_variable(torch.zeros(images_src.size(0)).long())
+            label_tgt = make_variable(torch.ones(images_tgt.size(0)).long())
 
             # Zero gradients for optimizer
             optimizer.zero_grad()
 
+            if robust:
+                delta_src = attack_pgd(encoder, classifier, images_src, labels_src)
+                delta_tgt = attack_pgd(encoder, critic, images_tgt, label_tgt, dann=alpha)
+
+                robust_src = normalize(torch.clamp(images_src + delta_src[:images_src.size(0)],
+                                                      min=params.lower_limit, max=params.upper_limit))
+                robust_tgt = normalize(torch.clamp(images_tgt + delta_tgt[:images_tgt.size(0)],
+                                                   min=params.lower_limit, max=params.upper_limit))
+
             # Train on source domain
-            feats = encoder(images_src)
+            feats = encoder(images_src) if not robust else encoder(robust_src)
             reversed_feats = ReverseLayerF.apply(feats.view(-1, 50 * 4 * 4), alpha)
             preds_src = classifier(feats)
             preds_src_domain = critic(reversed_feats)
@@ -622,7 +634,9 @@ def train_dann(encoder, classifier, critic, src_data_loader, tgt_data_loader, tg
             loss_src_domain = criterion(preds_src_domain, label_src)
 
             # Train on target domain
-            preds_tgt_domain = critic(encoder(images_tgt))
+            tgt_feats = encoder(images_tgt) if not robust else encoder(robust_tgt)
+            tgt_reversed_feats = ReverseLayerF.apply(tgt_feats.view(-1, 50 * 4 * 4), alpha)
+            preds_tgt_domain = critic(tgt_reversed_feats)
             loss_tgt_domain = criterion(preds_tgt_domain, label_tgt)
 
             loss = loss_src + loss_src_domain + loss_tgt_domain
@@ -654,6 +668,7 @@ def train_dann(encoder, classifier, critic, src_data_loader, tgt_data_loader, tg
                                                            train_domain_acc/ train_domain_n,
                                                            train_clf_loss/train_clf_n,
                                                            train_clf_acc/train_clf_n))
+
         time_elapsed = start_time - time.time()
         # Eval model
         if ((epoch + 1) % params.eval_step == 0):

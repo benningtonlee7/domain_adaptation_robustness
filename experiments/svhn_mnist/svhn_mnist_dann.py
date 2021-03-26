@@ -28,7 +28,7 @@ def main():
     print("====== Training source encoder and classifier in SVHN and MNIST domains ======")
     if not (tgt_encoder.pretrained and clf.pretrained and critic.pretrained and params.model_trained):
         tgt_encoder, clf, critic = train_dann(tgt_encoder, clf, critic,
-                                              svhn_data_loader, mnist_data_loader, robust=False)
+                                              svhn_data_loader, mnist_data_loader, mnist_data_loader_eval, robust=False)
 
     # Eval target encoder on test set of target dataset
     print("====== Evaluating classifier for encoded SVHN and MNIST domain ======")

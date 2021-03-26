@@ -49,13 +49,21 @@ def init_weights(layer):
         layer.weight.data.normal_(1.0, 0.02)
         layer.bias.data.fill_(0)
 
-def lr_schedule(t, num_epochs):
+def lr_piecewise(t, num_epochs):
     if t / num_epochs < 0.5:
         return params.lr_max
     elif t / num_epochs < 0.75:
         return params.lr_max / 10.0
     else:
         return params.lr_max / 100.0
+
+
+def lr_scheduler(p):
+    lr_0 = 0.01
+    alpha = 10
+    beta = 0.75
+    lr = lr_0 / (1 + alpha * p)**beta
+    return lr
 
 
 def clamp(X, lower_limit=params.lower_limit, upper_limit=params.upper_limit):
