@@ -618,17 +618,23 @@ def train_dann(encoder, classifier, critic, src_data_loader, tgt_data_loader, tg
 
             if robust:
                 delta_src = attack_pgd(encoder, classifier, images_src, labels_src)
+                delta_src_domain = attack_pgd(encoder, critic, images_src, label_src, dann=alpha)
                 delta_tgt = attack_pgd(encoder, critic, images_tgt, label_tgt, dann=alpha)
 
                 robust_src = normalize(torch.clamp(images_src + delta_src[:images_src.size(0)],
+                                                      min=params.lower_limit, max=params.upper_limit))
+                robust_src_domain = normalize(torch.clamp(images_src + delta_src_domain[:images_src.size(0)],
                                                       min=params.lower_limit, max=params.upper_limit))
                 robust_tgt = normalize(torch.clamp(images_tgt + delta_tgt[:images_tgt.size(0)],
                                                    min=params.lower_limit, max=params.upper_limit))
 
             # Train on source domain
             feats = encoder(images_src) if not robust else encoder(robust_src)
-            reversed_feats = ReverseLayerF.apply(feats.view(-1, 50 * 4 * 4), alpha)
             preds_src = classifier(feats)
+            if robust:
+                feats = encoder(robust_src_domain)
+            reversed_feats = ReverseLayerF.apply(feats.view(-1, 50 * 4 * 4), alpha)
+
             preds_src_domain = critic(reversed_feats)
             loss_src = criterion(preds_src, labels_src)
             loss_src_domain = criterion(preds_src_domain, label_src)
