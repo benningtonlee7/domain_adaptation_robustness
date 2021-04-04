@@ -11,18 +11,15 @@ def main():
     init_random_seed(params.manual_seed)
 
     # Load dataset
-    mnist_data_loader = get_mnist(train=True, download=True)
-    mnist_data_loader_eval = get_mnist(train=False, download=True)
+    mnist_data_loader = get_usps(train=True, download=True)
+    mnist_data_loader_eval = get_usps(train=False, download=True)
     usps_data_loader = get_usps(train=True, download=True)
     usps_data_loader_eval = get_usps(train=False, download=True)
 
     # Model init ADDA
     src_encoder = model_init(Encoder(), params.src_encoder_adda_rb_path)
     tgt_encoder = model_init(Encoder(), params.tgt_encoder_adda_rb_path)
-    critic = model_init(Discriminator(in_dims=params.d_in_dims,
-                                      h_dims=params.d_h_dims,
-                                      out_dims=params.d_out_dims),
-                                        params.disc_adda_rb_path)
+    critic = model_init(Discriminator(), params.disc_adda_rb_path)
     clf = model_init(Classifier(), params.clf_adda_rb_path)
 
     # Train source model for adda
@@ -43,8 +40,8 @@ def main():
 
     if not (tgt_encoder.pretrained and critic.pretrained and
             params.model_trained):
-        tgt_encoder = train_tgt_adda(src_encoder, tgt_encoder, critic,
-                                     mnist_data_loader, usps_data_loader, robust=True)
+        tgt_encoder = train_tgt_adda(src_encoder, tgt_encoder, clf, critic,
+                                     mnist_data_loader, usps_data_loader, usps_data_loader_eval, robust=True)
 
     # Eval target encoder on test set of target dataset
     print("====== Ealuating classifier for encoded USPS domain ======")
@@ -52,6 +49,7 @@ def main():
     eval_tgt_robust(src_encoder, clf, usps_data_loader_eval)
     print("-------- Domain adaption --------")
     eval_tgt_robust(tgt_encoder, clf, usps_data_loader_eval)
+
 
 if __name__ == '__main__':
     main()

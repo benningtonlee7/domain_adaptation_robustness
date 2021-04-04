@@ -1,9 +1,7 @@
-"""Utility functions for ADDA"""
-
 import os
 import random
 import torch
-from torch.autograd import Variable, grad
+from torch.autograd import grad
 import params
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -21,10 +19,10 @@ def init_random_seed(manual_seed):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
-def make_variable(tensor, volatile=False):
+def make_variable(tensor):
     """Convert Tensor to Variable."""
     tensor = tensor.to(DEVICE)
-    return Variable(tensor, volatile=volatile)
+    return tensor
 
 
 def make_cuda(tensor):
@@ -33,6 +31,8 @@ def make_cuda(tensor):
         tensor = tensor.cuda()
     return tensor
 
+def gray2rgb(tensor):
+    return tensor.repeat(3, 1, 1)
 
 def denormalize(x, std, mean):
     """Invert normalization, and then convert array into image."""
@@ -70,7 +70,7 @@ def clamp(X, lower_limit=params.lower_limit, upper_limit=params.upper_limit):
     return torch.max(torch.min(X, upper_limit), lower_limit)
 
 
-def normalize(X, std=params.dataset_std_value, mean=params.dataset_mean_value):
+def normalize(X, std=params.dataset_std, mean=params.dataset_mean):
     return (X - mean)/std
 
 
@@ -97,9 +97,15 @@ def gradient_penalty(critic, h_s, h_t):
                      grad_outputs=torch.ones_like(preds),
                      retain_graph=True, create_graph=True)[0]
     gradient_norm = gradients.norm(2, dim=1)
-    grad_penalty = ((gradient_norm - 1) ** 2).mean()
+    gp = ((gradient_norm - 1)**2).mean()
 
-    return grad_penalty
+    return gp
+
+
+def set_requires_grad(model, requires_grad=True):
+    for param in model.parameters():
+        param.requires_grad = requires_grad
+
 
 def update_lr(optimizer, lr):
 

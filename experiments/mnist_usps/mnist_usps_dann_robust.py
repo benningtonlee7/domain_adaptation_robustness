@@ -18,17 +18,14 @@ def main():
 
     # Model init DANN
     tgt_encoder = model_init(Encoder(), params.tgt_encoder_dann_rb_path)
-    critic = model_init(Discriminator(in_dims=params.d_in_dims,
-                                      h_dims=params.d_h_dims,
-                                      out_dims=params.d_out_dims),
-                        params.disc_dann_rb_path)
+    critic = model_init(Discriminator(), params.disc_dann_rb_path)
     clf = model_init(Classifier(), params.clf_dann_rb_path)
 
     # Train models
     print("====== Robust Training source encoder and classifier in MNIST and USPS domains ======")
     if not (tgt_encoder.pretrained and clf.pretrained and critic.pretrained and params.model_trained):
         tgt_encoder, clf, critic = train_dann(tgt_encoder, clf, critic,
-                                                 mnist_data_loader, usps_data_loader, robust=True)
+                                              mnist_data_loader, usps_data_loader, usps_data_loader_eval, robust=True)
 
     # Eval target encoder on test set of target dataset
     print("====== Evaluating classifier for encoded MNIST and USPS domains ======")
@@ -36,6 +33,7 @@ def main():
     eval_tgt_robust(tgt_encoder, clf, mnist_data_loader_eval)
     print("-------- USPS adaption --------")
     eval_tgt_robust(tgt_encoder, clf, usps_data_loader_eval)
+
 
 if __name__ == '__main__':
     main()

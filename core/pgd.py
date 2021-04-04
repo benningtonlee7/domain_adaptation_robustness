@@ -1,10 +1,9 @@
 import params
 import torch.nn.functional as F
-from models.models import ReverseLayerF
 from utils.utils import clamp, normalize
 import torch
 
-def attack_pgd(encoder, classifier, X, y, dann=None, epsilon=params.epsilon, alpha=params.pgd_alpha,
+def attack_pgd(encoder, classifier, X, y, epsilon=params.epsilon, alpha=params.pgd_alpha,
                attack_iters=params.attack_iters, restarts=params.restarts,
                norm=params.norm, early_stop=params.early_stop, clamps=params.clamps):
 
@@ -25,8 +24,6 @@ def attack_pgd(encoder, classifier, X, y, dann=None, epsilon=params.epsilon, alp
         delta.requires_grad = True
         for _ in range(attack_iters):
             feats = encoder((normalize(X + delta)))
-            if dann:
-                feats = ReverseLayerF.apply(feats.view(-1, 50 * 4 * 4), dann)
             output = classifier(feats)
             if early_stop:
                 index = torch.where(output.max(1)[1] == y)[0]

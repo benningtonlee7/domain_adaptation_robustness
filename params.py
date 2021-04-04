@@ -1,17 +1,13 @@
 # Params for dataset and data loader
 data_root = "data"
-dataset_mean_value = 0.5
-dataset_std_value = 0.5
-dataset_mean = [dataset_mean_value, dataset_mean_value, dataset_mean_value]
-dataset_std = [dataset_std_value, dataset_std_value, dataset_std_value]
+dataset_mean = 0.5
+dataset_std = 0.5
 batch_size = 128
+num_worker = 2
 
 # Params for models
 model_root = "snapshots"
 model_trained = True
-d_in_dims = 500
-d_h_dims = 500
-d_out_dims = 2
 
 # ADDA
 adda_root = "snapshots/ADDA"
@@ -56,22 +52,22 @@ clf_dann_rb_path = "snapshots/DANN/DANN-classifier-rb-final.pt"
 disc_dann_rb_path = "snapshots/DANN/DANN-critic-rb-final.pt"
 
 # Params for training network
-num_epochs_pre = 50
+num_epochs_pre = 10
 log_step_pre = 50  # log every # steps
-eval_step_pre = 25  # eval every # epoch
-save_step_pre = 10  # save every # epoch
-num_epochs = 200  # epochs for training
-log_step = 20  # log every # steps
-eval_step = 50  # Eval every # epoch
-save_step = 50  # save every # epoch
+eval_step_pre = 5  # eval every # epoch
+save_step_pre = 5  # save every # epoch
+num_epochs = 30  # epochs for training
+log_step = 50  # log every # steps
+eval_step = 5  # Eval every # epoch
+save_step = 5  # save every # epoch
 manual_seed = None
 lr_max = 0.01
 early_stop = False
 
 # Params for optimizing models
-c_learning_rate = 1e-4
-beta1 = 0.5
-beta2 = 0.9
+learning_rate = 2e-4
+momentum = 0.9
+weight_decay = 0.0005
 
 # Params for PGD attack
 upper_limit = 1
@@ -84,10 +80,6 @@ norm = 'l_inf'
 epsilon = 8
 
 # Params for wdgrl
-wd_clf = 0.1
-num_epochs_wdgrl_pre = 10
-
-# Params for dann
-momentum = 0.9
-lr = 0.01
-weight_decay = 1e-6
+wd_clf = 0.00045
+wd_gp = 10
+num_times_critic = 10

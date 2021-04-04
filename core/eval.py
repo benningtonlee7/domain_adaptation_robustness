@@ -19,7 +19,7 @@ def eval_tgt_robust(encoder, classifier, data_loader):
 
     # Evaluate network
     for (images, labels) in data_loader:
-        images = make_variable(images, volatile=True)
+        images = make_variable(images)
         labels = make_variable(labels)
 
         delta = attack_pgd(encoder, classifier, images, labels)
@@ -60,7 +60,7 @@ def eval_tgt(encoder, classifier, data_loader):
 
     # Evaluate network
     for (images, labels) in data_loader:
-        images = make_variable(images, volatile=True)
+        images = make_variable(images)
         labels = make_variable(labels)
 
         out = classifier(encoder(images))
