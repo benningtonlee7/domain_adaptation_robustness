@@ -1,7 +1,7 @@
 from models.models import Encoder, Classifier, Discriminator
 from datasets.datasets import get_usps, get_mnist
 from core.train import train_src_adda, train_tgt_adda
-from core.eval import eval_tgt_robust
+from core.eval import eval_tgt
 from utils.utils import init_random_seed, model_init
 import params
 
@@ -30,7 +30,7 @@ def main():
 
     # Eval source model
     print("====== Evaluating classifier for MNIST domain ======")
-    eval_tgt_robust(src_encoder, clf, mnist_data_loader_eval)
+    eval_tgt(src_encoder, clf, mnist_data_loader_eval)
 
     # Train target encoder
     print("====== Training encoder for USPS domain ======")
@@ -46,9 +46,9 @@ def main():
     # Eval target encoder on test set of target dataset
     print("====== Evaluating classifier for encoded USPS domain ======")
     print("-------- Source only --------")
-    eval_tgt_robust(src_encoder, clf, usps_data_loader_eval)
+    eval_tgt(src_encoder, clf, usps_data_loader_eval)
     print("-------- Domain adaption --------")
-    eval_tgt_robust(tgt_encoder, clf, usps_data_loader_eval)
+    eval_tgt(tgt_encoder, clf, usps_data_loader_eval)
 
 
 if __name__ == '__main__':

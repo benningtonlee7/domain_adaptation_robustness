@@ -1,6 +1,6 @@
 from models.models import Encoder, Classifier, Discriminator
 from datasets.datasets import get_svhn, get_mnist
-from core.train import train_revgard
+from core.train import train_revgrad
 from core.eval import eval_tgt_robust
 from utils.utils import init_random_seed, model_init
 import params
@@ -26,7 +26,7 @@ def main():
     # Train models
     print("====== Training source encoder and classifier in SVHN and MNIST domain ======")
     if not (tgt_encoder.pretrained and clf.pretrained and critic.pretrained and params.model_trained):
-        tgt_encoder, clf, critic = train_revgard(tgt_encoder, clf, critic,
+        tgt_encoder, clf, critic = train_revgrad(tgt_encoder, clf, critic,
                                                  svhn_data_loader, mnist_data_loader, robust=True)
 
     # Eval target encoder on test set of target dataset

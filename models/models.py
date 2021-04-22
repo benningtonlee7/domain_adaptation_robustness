@@ -11,22 +11,20 @@ from torch.autograd import Function
 
 
 class Encoder(nn.Module):
-
     def __init__(self):
         super().__init__()
         self.pretrained = False
         self.feature_extractor = nn.Sequential(
                 nn.Conv2d(3, 64, kernel_size=(5, 5)),
                 nn.BatchNorm2d(64),
+                nn.MaxPool2d(2),
                 nn.ReLU(),
                 nn.Conv2d(64, 64, kernel_size=(5, 5)),
                 nn.BatchNorm2d(64),
+                nn.MaxPool2d(2),
                 nn.ReLU(),
-                nn.Conv2d(64, 32, kernel_size=(5, 5)),
-                nn.BatchNorm2d(32),
-                nn.ReLU(),
-                nn.MaxPool2d(kernel_size=(2, 2)),
-                nn.Dropout2d(0.5),
+                nn.Conv2d(64, 64 * 2, kernel_size=(5, 5)),
+                nn.BatchNorm2d(64 * 2),
                 )
 
     def forward(self, x):
@@ -36,18 +34,18 @@ class Encoder(nn.Module):
 
 
 class Classifier(nn.Module):
-
     def __init__(self):
         super().__init__()
         self.pretrained = False
         self.classifier = nn.Sequential(
-                nn.Linear(32 * 10 * 10, 1024),
-                nn.BatchNorm1d(1024),
+                nn.Linear(128, 100),
+                nn.BatchNorm1d(100),
                 nn.ReLU(),
-                nn.Linear(1024, 256),
-                nn.BatchNorm1d(256),
+                nn.Dropout2d(),
+                nn.Linear(100, 100),
+                nn.BatchNorm1d(100),
                 nn.ReLU(),
-                nn.Linear(256, 10),
+                nn.Linear(100, 10),
                 )
 
     def forward(self, x):
@@ -57,18 +55,17 @@ class Classifier(nn.Module):
 
 class Discriminator(nn.Module):
 
-    def __init__(self):
+    def __init__(self, out_num=2):
         super().__init__()
         self.pretrained = False
         self.layers = nn.Sequential(
-            nn.Linear(32 * 10 * 10, 512),
+            nn.Linear(128, 100),
+            nn.BatchNorm1d(100),
             nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(512, 512),
+            nn.Linear(100, 100),
+            nn.BatchNorm1d(100),
             nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(512, 2),
-            nn.LogSoftmax(dim=1)
+            nn.Linear(100, out_num)
         )
 
     def forward(self, x, alpha=None):

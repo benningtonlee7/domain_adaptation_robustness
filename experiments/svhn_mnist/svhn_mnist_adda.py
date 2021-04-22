@@ -19,10 +19,7 @@ def main():
     # Model init ADDA
     src_encoder = model_init(Encoder(), params.src_encoder_adda_path)
     tgt_encoder = model_init(Encoder(), params.tgt_encoder_adda_path)
-    critic = model_init(Discriminator(in_dims=params.d_in_dims,
-                                      h_dims=params.d_h_dims,
-                                      out_dims=params.d_out_dims),
-                                    params.disc_adda_path)
+    critic = model_init(Discriminator(), params.disc_adda_path)
     clf = model_init(Classifier(), params.clf_adda_path)
 
     # Train source model for adda
